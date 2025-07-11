@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ping Pong - Jogue com sua namorada</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .game-container {
+            position: relative;
+            width: 100%;
+            height: 400px;
+            background-color: #111;
+            border: 3px solid #444;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 20px auto;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        canvas {
+            display: block;
+            background-color: #000;
+        }
+
+        .menu {
+            padding: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 12px 24px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 10px 5px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        .score {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            padding: 10px 0;
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        .instructions {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }
+
+        .waiting {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 100;
+            display: none;
+        }
+
+        .player-info {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            margin-bottom: 15px;
+        }
+
+        #gameIdDisplay {
+            font-family: monospace;
+            font-size: 1.2rem;
+            background-color: rgba(0, 0, 0, 0.3);
+            padding: 8px 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+
+        @media (max-width: 600px) {
+            .game-container {
+                height: 300px;
+            }
+            
+            h1 {
+                font-size: 1.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Ping Pong Multiplayer</h1>
+        
+        <div id="menuScreen" class="menu">
+            <div class="player-info">
+                <div>
+                    <label for="playerName">Seu nome:</label>
+                    <input type="text" id="playerName" placeholder="Seu nome" value="Jogador 1">
+                </div>
+            </div>
+            <button id="createGameBtn">Criar Partida</button>
+            <div style="margin: 15px 0; font-size: 1.2rem;">OU</div>
+            <div>
+                <input type="text" id="gameIdInput" placeholder="ID da Partida">
+                <button id="joinGameBtn">Entrar na Partida</button>
+            </div>
+            <div class="instructions">
+                <p><strong>Como jogar:</strong></p>
+                <p>- Criar partida: gere um ID para seu jogo</p>
+                <p>- Entrar na partida: coloque o ID que seu parceiro criou</p>
+                <p>- Controles: Teclas W/S ou setas ↑/↓</p>
+                <p>- Toques no celular também funcionam!</p>
+            </div>
+        </div>
+        
+        <div id="gameIdDisplay" style="display: none;"></div>
+        
+        <div class="game-container">
+            <div id="waitingScreen" class="waiting">
+                <h2>Aguardando outro jogador...</h2>
+                <p>Compartilhe este ID com seu parceiro:</p>
+                <div id="shareGameId" style="font-size: 1.5rem; font-weight: bold;"></div>
+                <p>Ou envie este link:</p>
+                <div id="gameLink" style="word-break: break-all; margin: 10px 0;"></div>
+            </div>
+            
+            <canvas id="gameCanvas"></canvas>
+            <div class="score">
+                <div id="player1Score">0</div>
+                <div id="player2Score">0</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configurações do jogo
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Elementos da UI
+        const menuScreen = document.getElementById('menuScreen');
+        const waitingScreen = document.getElementById('waitingScreen');
+        const gameIdDisplay = document.getElementById('gameIdDisplay');
+        const shareGameId = document.getElementById('shareGameId');
+        const gameLink = document.getElementById('gameLink');
+        const player1Score = document.getElementById('player1Score');
+        const player2Score = document.getElementById('player2Score');
+        const createGameBtn = document.getElementById('createGameBtn');
+        const joinGameBtn = document.getElementById('joinGameBtn');
+        const gameIdInput = document.getElementById('gameIdInput');
+        const playerNameInput = document.getElementById('playerName');
+        
+        // Ajustar tamanho do canvas
+        function resizeCanvas() {
+            const parent = canvas.parentElement;
+            canvas.width = parent.clientWidth;
+            canvas.height = parent.clientHeight - 40; // Subtrair altura do placar
+        }
+        
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+        
+        // Variáveis do jogo
+        let gameState = {
+            ball: { x: 0, y: 0, radius: 10, speedX: 0, speedY: 0 },
+            player1: { x: 0, y: 0, width: 15, height: 100, score: 0, name: '' },
+            player2: { x: 0, y: 0, width: 15, height: 100, score: 0, name: '' },
+            gameId: '',
+            playerId: '',
+            isHost: false,
+            gameActive: false
+        };
+        
+        // Socket.io connection
+        const socket = io('https://socket-io-server-simple-ping-pong.glitch.me', {
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000,
+        });
+        
+        // Eventos do socket
+        socket.on('connect', () => {
+            gameState.playerId = socket.id;
+            console.log('Conectado ao servidor com ID:', gameState.playerId);
+        });
+        
+        socket.on('gameCreated', (gameId) => {
+            gameState.gameId = gameId;
+            gameState.isHost = true;
+            gameState.player1.name = playerNameInput.value || 'Jogador 1';
+            
+            menuScreen.style.display = 'none';
+            waitingScreen.style.display = 'block';
+            gameIdDisplay.style.display = 'block';
+            
+            shareGameId.textContent = gameId;
+            gameIdDisplay.textContent = `ID da Partida: ${gameId}`;
+            
+            const currentUrl = new URL(window.location.href);
+            currentUrl.searchParams.set('gameId', gameId);
+            gameLink.textContent = currentUrl.toString();
+        });
+        
+        socket.on('playerJoined', (playerName) => {
+            gameState.player2.name = playerName;
+            waitingScreen.style.display = 'none';
+            startGame();
+        });
+        
+        socket.on('gameJoined', (data) => {
+            gameState.gameId = data.gameId;
+            gameState.isHost = false;
+            gameState.player2.name = playerNameInput.value || 'Jogador 2';
+            gameState.player1.name = data.hostName;
+            
+            menuScreen.style.display = 'none';
+            gameIdDisplay.style.display = 'block';
+            gameIdDisplay.textContent = `ID da Partida: ${data.gameId}`;
+            
+            startGame();
+        });
+        
+        socket.on('gameStateUpdate', (state) => {
+            gameState.ball = state.ball;
+            
+            if (gameState.isHost) {
+                gameState.player2.y = state.player2;
+            } else {
+                gameState.player1.y = state.player1;
+            }
+        });
+        
+        socket.on('scoreUpdate', (scores) => {
+            gameState.player1.score = scores.player1;
+            gameState.player2.score = scores.player2;
+            
+            player1Score.textContent = gameState.player1.score;
+            player2Score.textContent = gameState.player2.score;
+        });
+        
+        socket.on('playerDisconnected', () => {
+            alert('Seu parceiro desconectou! Voltando ao menu...');
+            resetGame();
+        });
+        
+        socket.on('gameNotFound', () => {
+            alert('Partida não encontrada. Verifique o ID e tente novamente.');
+        });
+        
+        // Controles
+        const keys = { ArrowUp: false, ArrowDown: false, w: false, s: false };
+        
+        window.addEventListener('keydown', (e) => {
+            if (e.key in keys) {
+                keys[e.key] = true;
+                e.preventDefault();
+                sendPlayerInput();
+            }
+        });
+        
+        window.addEventListener('keyup', (e) => {
+            if (e.key in keys) {
+                keys[e.key] = false;
+                e.preventDefault();
+                sendPlayerInput();
+            }
+        });
+        
+        // Controles touch para mobile
+        const gameContainer = document.querySelector('.game-container');
+        let touchY = 0;
+        
+        gameContainer.addEventListener('touchstart', (e) => {
+            touchY = e.touches[0].clientY;
+            e.preventDefault();
+        });
+        
+        gameContainer.addEventListener('touchmove', (e) => {
+            const newTouchY = e.touches[0].clientY;
+            keys.ArrowUp = newTouchY < touchY;
+            keys.ArrowDown = newTouchY > touchY;
+            touchY = newTouchY;
+            sendPlayerInput();
+            e.preventDefault();
+        });
+        
+        gameContainer.addEventListener('touchend', () => {
+            keys.ArrowUp = false;
+            keys.ArrowDown = false;
+            sendPlayerInput();
+        });
+        
+        function sendPlayerInput() {
+            if (gameState.gameActive) {
+                socket.emit('playerInput', {
+                    gameId: gameState.gameId,
+                    up: keys.ArrowUp || keys.w,
+                    down: keys.ArrowDown || keys.s
+                });
+            }
+        }
+        
+        // Lógica do jogo
+        function startGame() {
+            resetGame();
+            
+            // Posições iniciais
+            gameState.ball.x = canvas.width / 2;
+            gameState.ball.y = canvas.height / 2;
+            gameState.ball.speedX = gameState.isHost ? 5 : -5;
+            gameState.ball.speedY = Math.random() * 6 - 3;
+            
+            gameState.player1.x = 20;
+            gameState.player1.y = (canvas.height / 2) - (gameState.player1.height / 2);
+            
+            gameState.player2.x = canvas.width - 35;
+            gameState.player2.y = (canvas.height / 2) - (gameState.player2.height / 2);
+            
+            if (gameState.isHost) {
+                gameState.gameActive = true;
+                requestAnimationFrame(gameLoop);
+            } else {
+                gameState.gameActive = true;
+                requestAnimationFrame(render);
+            }
+            
+            // Atualizar nomes nos placares
+            player1Score.textContent = '0';
+            player2Score.textContent = '0';
+            
+            // Verificar se tem gameId na URL (para compartilhamento)
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('gameId') && !gameState.gameId) {
+                const gameId = urlParams.get('gameId');
+                gameIdInput.value = gameId;
+            }
+        }
+        
+        function gameLoop() {
+            if (!gameState.gameActive) return;
+            
+            updateGame();
+            render();
+            
+            if (gameState.isHost) {
+                socket.emit('gameStateUpdate', {
+                    gameId: gameState.gameId,
+                    ball: gameState.ball,
+                    player1: gameState.player1.y,
+                    player2: gameState.player2.y
+                });
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        function updateGame() {
+            if (!gameState.isHost) return;
+            
+            // Movimentação da bola
+            gameState.ball.x += gameState.ball.speedX;
+            gameState.ball.y += gameState.ball.speedY;
+            
+            // Colisão com as paredes superior e inferior
+            if (gameState.ball.y - gameState.ball.radius < 0 || 
+                gameState.ball.y + gameState.ball.radius > canvas.height - 40) {
+                gameState.ball.speedY = -gameState.ball.speedY;
+            }
+            
+            // Colisão com as raquetes
+            // Jogador 1 (esquerda)
+            if (gameState.ball.x - gameState.ball.radius < gameState.player1.x + gameState.player1.width &&
+                gameState.ball.x - gameState.ball.radius > gameState.player1.x &&
+                gameState.ball.y > gameState.player1.y &&
+                gameState.ball.y < gameState.player1.y + gameState.player1.height) {
+                
+                const relativeIntersectY = (gameState.player1.y + (gameState.player1.height / 2)) - gameState.ball.y;
+                const normalizedRelativeIntersectionY = relativeIntersectY / (gameState.player1.height / 2);
+                const bounceAngle = normalizedRelativeIntersectionY * (Math.PI / 4);
+                
+                gameState.ball.speedX = Math.cos(bounceAngle) * 8;
+                gameState.ball.speedY = Math.sin(bounceAngle) * -8;
+            }
+            
+            // Jogador 2 (direita)
+            if (gameState.ball.x + gameState.ball.radius > gameState.player2.x &&
+                gameState.ball.x + gameState.ball.radius < gameState.player2.x + gameState.player2.width &&
+                gameState.ball.y > gameState.player2.y &&
+                gameState.ball.y < gameState.player2.y + gameState.player2.height) {
+                
+                const relativeIntersectY = (gameState.player2.y + (gameState.player2.height / 2)) - gameState.ball.y;
+                const normalizedRelativeIntersectionY = relativeIntersectY / (gameState.player2.height / 2);
+                const bounceAngle = normalizedRelativeIntersectionY * (Math.PI / 4);
+                
+                gameState.ball.speedX = Math.cos(bounceAngle + Math.PI) * 8;
+                gameState.ball.speedY = Math.sin(bounceAngle + Math.PI) * -8;
+            }
+            
+            // Pontuação
+            if (gameState.ball.x < 0) {
+                gameState.player2.score++;
+                socket.emit('scoreUpdate', { 
+                    gameId: gameState.gameId,
+                    player1: gameState.player1.score,
+                    player2: gameState.player2.score
+                });
+                resetBall();
+            }
+            
+            if (gameState.ball.x > canvas.width) {
+                gameState.player1.score++;
+                socket.emit('scoreUpdate', { 
+                    gameId: gameState.gameId,
+                    player1: gameState.player1.score,
+                    player2: gameState.player2.score
+                });
+                resetBall();
+            }
+        }
+        
+        function resetBall() {
+            gameState.ball.x = canvas.width / 2;
+            gameState.ball.y = canvas.height / 2;
+            gameState.ball.speedX = gameState.isHost ? 5 : -5;
+            gameState.ball.speedY = Math.random() * 6 - 3;
+        }
+        
+        function render() {
+            // Limpar o canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Desenhar o campo
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height - 40);
+            
+            // Linha central
+            ctx.strokeStyle = '#fff';
+            ctx.setLineDash([10, 10]);
+            ctx.beginPath();
+            ctx.moveTo(canvas.width / 2, 0);
+            ctx.lineTo(canvas.width / 2, canvas.height - 40);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            
+            // Desenhar a bola
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(gameState.ball.x, gameState.ball.y, gameState.ball.radius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Desenhar as raquetes
+            ctx.fillStyle = gameState.isHost ? '#4CAF50' : '#2196F3';
+            ctx.fillRect(
+                gameState.player1.x,
+                gameState.player1.y,
+                gameState.player1.width,
+                gameState.player1.height
+            );
+            
+            ctx.fillStyle = gameState.isHost ? '#2196F3' : '#4CAF50';
+            ctx.fillRect(
+                gameState.player2.x,
+                gameState.player2.y,
+                gameState.player2.width,
+                gameState.player2.height
+            );
+            
+            // Desenhar nomes dos jogadores
+            ctx.fillStyle = '#fff';
+            ctx.font = '16px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(
+                gameState.player1.name,
+                canvas.width * 0.25,
+                canvas.height - 15
+            );
+            
+            ctx.fillText(
+                gameState.player2.name,
+                canvas.width * 0.75,
+                canvas.height - 15
+            );
+        }
+        
+        function resetGame() {
+            gameState.gameActive = false;
+            menuScreen.style.display = 'block';
+            waitingScreen.style.display = 'none';
+            gameIdDisplay.style.display = 'none';
+        }
+        
+        // Event listeners para os botões
+        createGameBtn.addEventListener('click', () => {
+            socket.emit('createGame', {
+                playerName: playerNameInput.value || 'Jogador 1'
+            });
+        });
+        
+        joinGameBtn.addEventListener('click', () => {
+            if (gameIdInput.value.trim()) {
+                socket.emit('joinGame', {
+                    gameId: gameIdInput.value.trim(),
+                    playerName: playerNameInput.value || 'Jogador 2'
+                });
+            } else {
+                alert('Por favor, insira o ID da partida');
+            }
+        });
+        
+        // Caso o link já tenha gameId, preencher automaticamente
+        window.addEventListener('load', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('gameId')) {
+                gameIdInput.value = urlParams.get('gameId');
+            }
+        });
+    </script>
+</body>
+</html>
+
